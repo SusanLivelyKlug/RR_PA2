@@ -1,0 +1,231 @@
+---
+title: "Storm Data Analysis 1950-2011"
+author: "Susan Lively Klug"
+date: "August 20, 2015"
+output: html_document
+---
+# Storm Data Analysis
+
+### Answering the questions
+1) Across the United States, which types of events are most harmful with respect to population health?
+2) Across the United States, which types of events have the greatest economic consequences?
+
+## Data Processing
+
+Original data and documentation locations as of 8/20/2015
+
+https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf
+https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf
+
+Download and read into the raw_data variable.
+Use cache for this chunk.
+```{r, cache=TRUE}
+
+if (!file.exists("StormData.csv.bz2")) {
+     download.file("http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",
+                   "./StormData.csv.bz2")
+}
+
+raw_data <- read.csv("StormData.csv.bz2")
+
+```
+Investigate choices for defining "most harmful with respect to population health"
+```{r}
+library(dplyr)
+names(raw_data)
+dim(raw_data)
+type <- unique(raw_data$EVTYPE)
+type_df <- data.frame(type)
+dim(type_df)
+```
+That is a lot of EVTYPEs, 985.  
+There are some EVTYPEs with Summaries.  These will overlap with the data
+that they are summarizing, so we filter them out.
+
+```{r}
+tdf <- filter(type_df, !grepl('Summary', type))
+dim(tdf)
+```
+921 different types is still going to make an unreadable plot, but we only care
+about the 'most harmful' so we can do some elimination of lower ranges once we
+select the interesting columns.
+
+Except: some of the EVTYPE are mangled and typo issues that should be combined.
+
+"Harmful to the Population Health" in this analysis refers to Fatalities and
+Injuries to persons.  The property or economic damage will be in the second
+section of the analysis.
+
+From names(raw_data) we know that we are interested in columns "INJURIES" 
+and "FATALITIES" and the columns "EVTYPE"
+
+```{r}
+
+columns.of.interest = c("EVTYPE", "INJURIES", "FATALITIES")
+pop.health <- select(raw_data, one_of(columns.of.interest))
+summary(pop.health)
+```
+
+We are safe to remove any rows that are zero for both INJURIES and FATALITIES
+as they will not help us in figuring out the "Maximum Damage"
+instead of subsetting one could assign them all to the "no damage" category
+
+```{r}
+sum( ( pop.health$INJURIES == 0 ) & ( pop.health$FATALITIES == 0) )
+pop.health.sm <- filter(pop.health, 
+             !(( pop.health$INJURIES == 0 ) & ( pop.health$FATALITIES == 0)))
+```
+Still doesn't remove many of the EVTYPEs.
+Some of the EVTYPES are mangled versions of each other and should be 
+combined.  We can fix the lower case using toupper from dplyr.
+There are numerous spelling errors and versions of the same EVTYPE
+that need to be brute force changed to match.
+
+```{r}
+library(reshape2)
+dfn = as.data.frame(sapply(pop.health.sm, toupper))
+
+## S3 method for class 'data.frame'
+newdfn <- melt(dfn, id.vars=c("EVTYPE") )
+
+# Need to make them allcaps then more will match with group_by
+# In dfn rows with matching EVTYPE and Variable
+# should be summed and collapsed.
+newdfn$value <- as.integer(newdfn$value)
+df <- newdfn %>% group_by(EVTYPE, variable) %>% summarise_each(funs(sum))
+df <- df[!(df$value == 0 ), ]
+```
+
+Now down to some gritty substituting to get to the valid EVTYPES
+gsub(pattern, replacement, x)
+
+```{r}
+df$EVTYPE = gsub("AVALANCE", "AVALANCHE", df$EVTYPE)
+df$EVTYPE = gsub("WINDS", "WIND", df$EVTYPE)
+df$EVTYPE = gsub("LANDSLIDES", "LANDSLIDE", df$EVTYPE)
+df$EVTYPE = gsub("SEAS", "SEA", df$EVTYPE)
+df$EVTYPE = gsub("ROADS", "ROAD", df$EVTYPE)
+df$EVTYPE = gsub("CURRENTS", "CURRENT", df$EVTYPE)
+
+df$EVTYPE = gsub("COASTAL FLOOD.*", "COASTAL FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("COASTALSTORM", "COASTAL STORM", df$EVTYPE)
+df$EVTYPE = gsub(".*FLASH FLOOD.*", "FLASH FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("FLOODING", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("FLOOD.*", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("MINOR FLOOD", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("TIDAL FLOOD", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("URBAN.* FLOOD", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("RIVER FLOOD", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("HIGH WATER", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub("RAPIDLY.*.WATER", "FLOOD", df$EVTYPE)
+df$EVTYPE = gsub(".*FLD", "FLOOD", df$EVTYPE)
+
+df$EVTYPE = gsub(".*FIRE.*", "WILDFIRE", df$EVTYPE)
+df$EVTYPE = gsub("WILD FIRE", "WILDFIRE", df$EVTYPE)
+
+df$EVTYPE = gsub("RAINS", "RAIN", df$EVTYPE)
+df$EVTYPE = gsub("RAINFALL", "RAIN", df$EVTYPE)
+df$EVTYPE = gsub("EXCESSIVE RAIN", "HEAVY RAIN", df$EVTYPE)
+df$EVTYPE = gsub("TORRENTIAL RAIN", "HEAVY RAIN", df$EVTYPE)
+
+df$EVTYPE = gsub("WINTER WEATHER.*", "WINTER WEATHER", df$EVTYPE)
+df$EVTYPE = gsub("RAIN/SNOW", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("GLAZE/ICE STORM", "WINTER STORM", df$EVTYPE)
+df$EVTYPE = gsub(".*EXTREME.*CHILL", "EX WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("EXTREME.*CHILL", "EX WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("COLD.*", "COLD", df$EVTYPE)
+df$EVTYPE = gsub("FOG AND COLD", "FREEZING FOG", df$EVTYPE)
+df$EVTYPE = gsub("UNS.*.COLD", "COLD", df$EVTYPE)
+df$EVTYPE = gsub("EXT.*.COLD", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("HIGH.*.COLD", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("RECORD.*.COLD", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("SNOW.*.COLD", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+df$EVTYPE = gsub("BLACK ICE", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FREEZING DRIZZLE", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FREEZING SPRAY", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FREEZING RAIN", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FREEZE", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FROST", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("FROST.*.FREEZE", "FROST/FREEZE", df$EVTYPE)
+df$EVTYPE = gsub("ICE STORM", "ICE", df$EVTYPE)
+df$EVTYPE = gsub(".*ICE.*", "ICE STORM", df$EVTYPE)
+df$EVTYPE = gsub("WINTRY.*", "WINTER WEATHER", df$EVTYPE)
+df$EVTYPE = gsub("SNOW.*", "SNOW", df$EVTYPE)
+df$EVTYPE = gsub("^SNOW.*", "WINTER STORM", df$EVTYPE)
+df$EVTYPE = gsub("LIGHT SNOW.*", "WINTER STORM", df$EVTYPE)
+df$EVTYPE = gsub("EX*.SNOW.*", "HEAVY STORM", df$EVTYPE)
+df$EVTYPE = gsub("THUNDERSNOW", "HEAVY STORM", df$EVTYPE)
+df$EVTYPE = gsub("BLOWING SNOW", "HEAVY STORM", df$EVTYPE)
+df$EVTYPE = gsub("EXCESSIVHEAVY STORM", "WINTER STORM", df$EVTYPE)
+df$EVTYPE = gsub(".*HAIL.*", "HAIL", df$EVTYPE)
+df$EVTYPE = gsub("WINTER STORM.*", "WINTER STORM", df$EVTYPE)
+df$EVTYPE = gsub(".*ICY.*", "WINTER WEATHER", df$EVTYPE)
+df$EVTYPE = gsub("EX WIND CHILL", "EXTREME COLD/WIND CHILL", df$EVTYPE)
+
+df$EVTYPE = gsub(".*DROUGHT.*", "DROUGHT", df$EVTYPE)
+df$EVTYPE = gsub(".*EX.*HEAT", "EXCESSIVE HEAT", df$EVTYPE)
+df$EVTYPE = gsub(".*HEAT W.*", "HEAT", df$EVTYPE)
+df$EVTYPE = gsub("RECORD HEAT", "HEAT", df$EVTYPE)
+df$EVTYPE = gsub(".*WARM.*", "HEAT", df$EVTYPE)
+
+df$EVTYPE = gsub(".*FOG", "DENSE FOG", df$EVTYPE)
+
+df$EVTYPE = gsub(".*RIP CURRENT.*", "RIP CURRENT", df$EVTYPE)
+df$EVTYPE = gsub(".*SURF.*", "HIGH SURF", df$EVTYPE)
+df$EVTYPE = gsub("STORM SURGE.*", "STORM SURGE", df$EVTYPE)
+
+df$EVTYPE = gsub("WATERSPOUT.*", "WATERSPOUT", df$EVTYPE)
+df$EVTYPE = gsub("HIGH WIND.*", "HIGH WIND", df$EVTYPE)
+df$EVTYPE = gsub(".*LIGHT.*", "LIGHTNING", df$EVTYPE)
+df$EVTYPE = gsub("STORMS", "STORM", df$EVTYPE)
+df$EVTYPE = gsub("WIND STORM", "WIND", df$EVTYPE)
+df$EVTYPE = gsub("RAIN/WIND", "STRONG WIND", df$EVTYPE)
+df$EVTYPE = gsub("TROPICAL STORM.*", "TROPICAL STORM", df$EVTYPE)
+df$EVTYPE = gsub("THUNDERST.*", "THUNDERSTORM", df$EVTYPE)
+df$EVTYPE = gsub("TSTM", "THUNDERSTORM", df$EVTYPE)
+df$EVTYPE = gsub(".*HURRI.*", "HURRICANE", df$EVTYPE)
+df$EVTYPE = gsub("WIND.*", "WIND", df$EVTYPE)
+df$EVTYPE = gsub(".*TORN.*", "TORNADO", df$EVTYPE)
+df$EVTYPE = gsub("MARINE THUNDERSTORM", "MARINE THUNDERSTORM WIND", df$EVTYPE)
+df$EVTYPE = gsub("^THUNDERSTORM$", "THUNDERSTORM WIND", df$EVTYPE)
+df$EVTYPE = gsub("^THUNDERTORM.*", "THUNDERSTORM WIND", df$EVTYPE)
+df$EVTYPE = gsub("WIND WIND", "WIND", df$EVTYPE)
+df$EVTYPE = gsub("NON THUNDERSTORM WIND", "HIGH WIND", df$EVTYPE)
+df$EVTYPE = gsub("^WIND$", "HIGH WIND", df$EVTYPE)
+```
+
+At this point visual inspection shows Tornado at an order of magnitude 
+more damaging than any other event.  We might be able to drop the '1's
+
+```{r}
+#mean(df$value)
+#df <- filter(df, (value > mean(df$value)))
+
+# followed by more group and summarise
+df <- df %>% group_by(EVTYPE, variable) %>% summarise_each(funs(sum))
+
+unique(df$EVTYPE)
+pop.health.df <- df # better name to save for later
+
+```
+
+## Results
+I would most like to see a bar chart with EVTYPE along the Y value.
+This was a quick way to be able to read the thirty plus types of events.
+
+```{r}
+library("knitr")
+#opts_chunk$set(fig.width=18, fig.height=10, dpi=144)
+opts_chunk$set(fig.width=80, fig.height=80, dpi=144)
+library(ggplot2)
+
+ggplot(pop.health.df, aes(x=EVTYPE, y=value, fill=variable)) +
+     geom_bar(stat="identity", position=position_dodge())+
+     ggtitle("Population Harm by Event") +
+     coord_flip()
+
+#  There should be a plot that takes the top X % of the results
+# and plots them, then sums the rest of the results as one value
+
+```
