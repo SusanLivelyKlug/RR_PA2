@@ -61,7 +61,6 @@ From names(raw_data) we know that we are interested in columns "INJURIES"
 and "FATALITIES" and the columns "EVTYPE"
 
 ```{r}
-
 columns.of.interest = c("EVTYPE", "INJURIES", "FATALITIES")
 pop.health <- select(raw_data, one_of(columns.of.interest))
 summary(pop.health)
@@ -199,33 +198,68 @@ At this point visual inspection shows Tornado at an order of magnitude
 more damaging than any other event.  We might be able to drop the '1's
 
 ```{r}
-#mean(df$value)
-#df <- filter(df, (value > mean(df$value)))
+m <- median(df$value)
+df <- filter(df, (value > m ) )
 
 # followed by more group and summarise
 df <- df %>% group_by(EVTYPE, variable) %>% summarise_each(funs(sum))
 
 unique(df$EVTYPE)
-pop.health.df <- df # better name to save for later
 
 ```
 
-## Results
 I would most like to see a bar chart with EVTYPE along the Y value.
 This was a quick way to be able to read the thirty plus types of events.
+But to narrow things down to executive summary let us look at the top ten.
 
 ```{r}
-library("knitr")
-#opts_chunk$set(fig.width=18, fig.height=10, dpi=144)
-opts_chunk$set(fig.width=80, fig.height=80, dpi=144)
 library(ggplot2)
-
-ggplot(pop.health.df, aes(x=EVTYPE, y=value, fill=variable)) +
+pop.health <- head(df[order(df$value, decreasing = T), ])
+pop.health
+ggplot(pop.health, aes(x=EVTYPE, y=value, fill=variable)) +
      geom_bar(stat="identity", position=position_dodge())+
      ggtitle("Population Harm by Event") +
      coord_flip()
 
-#  There should be a plot that takes the top X % of the results
-# and plots them, then sums the rest of the results as one value
-
 ```
+## Greatest Economic Consequences
+```{r}
+columns.of.interest = c("EVTYPE", "PROPDMG", "PROPDMGEXP")
+econ.prop <- select(raw_data, one_of(columns.of.interest))
+summary(econ.prop)
+columns.of.interest = c("EVTYPE", "CROPDMG","CROPDMGEXP")
+econ.crop <- select(raw_data, one_of(columns.of.interest))
+summary(econ.crop)
+```
+Reviewing the values of expenses related to Property and Crops.
+PROPDMG is the numeric value of the damage, PROPDMGEXP is the magnitude where 'B'=billions
+and the other factors are much smaller.
+
+We can safely view only the 'B' cases for crop and property damage.
+
+```{r}
+econ.prop <- filter(econ.prop, PROPDMGEXP=='B')
+econ.prop <- select(econ.prop, EVTYPE, PROPDMG)
+econ.prop <- econ.prop %>% group_by(EVTYPE) %>% summarise_each(funs(sum))
+econ.prop$EVTYPE = gsub(".*HURRI.*", "HURRICANE", econ.prop$EVTYPE)
+econ.prop$EVTYPE = gsub(".*TORN.*", "TORNADO", econ.prop$EVTYPE)
+econ.prop$EVTYPE = gsub(".*FIRE.*", "WILDFIRE", econ.prop$EVTYPE)
+
+econ.crop <- filter(econ.crop, CROPDMGEXP=='B')
+econ.crop <- select(econ.crop, EVTYPE, CROPDMG)
+econ.crop <- econ.crop %>% group_by(EVTYPE) %>% summarise_each(funs(sum))
+
+e <- full_join(econ.crop, econ.prop, by="EVTYPE")
+e[is.na(e)] <- 0
+e$damages <- e$CROPDMG + e$PROPDMG
+e <- arrange(e, desc(damages))
+e <- transform(e, EVTYPE = reorder(EVTYPE, damages))
+ggplot(e, aes(x=EVTYPE, y=damages)) +
+     geom_bar(stat="identity") +
+     ggtitle("Economic Damages by Weather Event") +
+     coord_flip() +
+     labs(x = "Billions of dollars", y = "Event type")
+```
+
+## Results
+
